@@ -1,20 +1,23 @@
 /**
- * STM32 Audio Player Core - WAV/MP3 Playback via I2S
+ * STM32F401RE Audio Player Core - PWM-based Audio Playback
  * Supports playlist management and playback control
+ * 
+ * Audio System: PWM with RC Filter on PA0 (TIM2_CH1)
+ * Sample Rate: 44100 Hz
+ * Resolution: 8-bit equivalent PWM
  */
 
 #include "player.h"
+#include "pwm_audio.h"
 #include "stm32f4xx_hal.h"
 #include <string.h>
 #include <stdio.h>
 
-/* Audio codec I2S handle */
-I2S_HandleTypeDef hi2s3;
-
-/* Audio buffer for DMA playback */
-#define AUDIO_BUFFER_SIZE 4096
-static uint8_t audio_buffer[AUDIO_BUFFER_SIZE];
-static uint32_t audio_pos = 0;
+/* Audio buffer for playback */
+#define AUDIO_BUFFER_SIZE 22050  // 500ms at 44.1kHz (max for F401RE 96KB RAM)
+static int16_t audio_buffer[AUDIO_BUFFER_SIZE];
+static uint32_t audio_buffer_pos = 0;
+static uint32_t audio_buffer_len = 0;
 
 /* Player state */
 static player_t player_state = {
@@ -28,21 +31,12 @@ static player_t player_state = {
 
 /**
  * Initialize audio player
+ * 
+ * Initializes PWM audio output on PA0 with 44.1kHz sampling
  */
 int player_init(void) {
-    // Initialize I2S for audio output
-    hi2s3.Instance = SPI3;
-    hi2s3.Init.Mode = I2S_MODE_MASTER_TX;
-    hi2s3.Init.Standard = I2S_STANDARD_PHILIPS;
-    hi2s3.Init.DataFormat = I2S_DATAFORMAT_16B;
-    hi2s3.Init.AudioFreq = I2S_AUDIOFREQ_44K;
-    hi2s3.Init.CPOL = I2S_CPOL_LOW;
-    hi2s3.Init.ClockSource = I2S_CLOCK_EXTERNAL;
-    hi2s3.Init.FullDuplexMode = I2S_FULLDUPLEXMODE_DISABLE;
-    
-    if (HAL_I2S_Init(&hi2s3) != HAL_OK) {
-        return PLAYER_ERROR;
-    }
+    // Initialize PWM audio system
+    pwm_audio_init();
     
     return PLAYER_OK;
 }
@@ -71,18 +65,21 @@ int player_load_file(const char* filename) {
 
 /**
  * Start playback
+ * 
+ * Note: For F401RE with limited RAM (96KB), audio is streamed from SD card
+ * This function starts playback of currently loaded audio buffer
  */
 int player_play(void) {
-    if (player_state.current_file[0] == '\0') {
+    if (audio_buffer_len == 0) {
         return PLAYER_ERROR_NO_FILE;
     }
     
     player_state.is_playing = 1;
     player_state.is_paused = 0;
-    audio_pos = 0;
+    audio_buffer_pos = 0;
     
-    // Start I2S DMA transfer
-    HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audio_buffer, AUDIO_BUFFER_SIZE / 2);
+    // Start PWM audio playback
+    audio_play(audio_buffer, audio_buffer_len);
     
     return PLAYER_OK;
 }
@@ -96,7 +93,7 @@ int player_pause(void) {
     }
     
     player_state.is_paused = 1;
-    HAL_I2S_DMAPause(&hi2s3);
+    audio_pause();
     
     return PLAYER_OK;
 }
@@ -110,7 +107,7 @@ int player_resume(void) {
     }
     
     player_state.is_paused = 0;
-    HAL_I2S_DMAResume(&hi2s3);
+    audio_resume();
     
     return PLAYER_OK;
 }
@@ -121,8 +118,8 @@ int player_resume(void) {
 int player_stop(void) {
     player_state.is_playing = 0;
     player_state.is_paused = 0;
-    HAL_I2S_DMAStop(&hi2s3);
-    audio_pos = 0;
+    audio_stop();
+    audio_buffer_pos = 0;
     
     return PLAYER_OK;
 }
@@ -136,7 +133,7 @@ int player_set_volume(uint8_t volume) {
     }
     
     player_state.volume = volume;
-    // TODO: Implement codec volume control via I2C
+    audio_set_volume(volume);
     
     return PLAYER_OK;
 }
@@ -178,29 +175,17 @@ player_t* player_get_state(void) {
  * Get playback position in seconds
  */
 uint32_t player_get_position(void) {
-    // Calculate position based on audio_pos
-    // Assuming 44100 Hz, 16-bit, stereo = 4 bytes per sample
-    uint32_t samples = audio_pos / 4;
+    uint32_t samples = audio_get_position();
     return samples / 44100;
 }
 
 /**
  * DMA Transmit Complete Callback
+ * 
+ * For F401RE, this would be called when streaming audio from SD card
+ * TODO: Implement streaming from SD card in chunks
  */
-void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
-    if (hi2s == &hi2s3) {
-        audio_pos += AUDIO_BUFFER_SIZE / 2;
-        // Load next audio chunk from SD card
-        // TODO: Implement audio file reading from SD card
-    }
-}
-
-/**
- * DMA Transmit Half Complete Callback
- */
-void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {
-    if (hi2s == &hi2s3) {
-        // Refill first half of buffer
-        // TODO: Read from audio file
-    }
+void audio_stream_callback(void) {
+    // This callback would be used for streaming audio from SD card
+    // For now, playback is handled entirely in PWM interrupt
 }

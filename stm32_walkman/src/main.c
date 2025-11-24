@@ -1,10 +1,25 @@
 /**
- * STM32 Walkman Music Player - Main Application
+ * STM32F401RE Walkman Music Player - Main Application
+ * 
+ * Hardware:
+ * - MCU: STM32F401RET6 Nucleo board
+ * - Audio: PWM-based via PA0 with RC filter (R=10kΩ, C=100nF)
+ * - Display: ILI9341 240x320 LCD via SPI1
+ * - Input: 7 GPIO buttons
+ * - Storage: SD card via SPI2
+ * 
  * Features:
- * - LCD display (240x320 TFT)
- * - Button controls (Previous, Play/Pause, Next, Volume, Shuffle, Loop)
- * - I2S audio output
- * - SD card support for music files
+ * - Playlist management (from SD card)
+ * - Play/Pause/Stop controls
+ * - Volume control (0-100%)
+ * - Shuffle and loop modes
+ * - Real-time playback display
+ * - MP3/WAV file support (requires decoder library)
+ * 
+ * Memory Constraints (F401RE):
+ * - RAM: 96KB total
+ * - Audio buffer: 22050 samples = 500ms at 44.1kHz
+ * - Audio must be streamed from SD card (not loaded entirely to RAM)
  */
 
 #include "stm32f4xx_hal.h"
@@ -278,8 +293,15 @@ void app_update_display(void) {
 }
 
 /**
- * System clock configuration (STM32F4)
- * Note: Adjust this based on your specific STM32F4 variant
+ * System clock configuration for STM32F401RE
+ * 
+ * F401RE Configuration:
+ * - System Clock: 84 MHz (maximum for F401)
+ * - APB1: 42 MHz
+ * - APB2: 84 MHz
+ * - HSI: 16 MHz (internal oscillator)
+ * 
+ * Note: F401RE uses HSI (16MHz internal clock), not HSE
  */
 void SystemClock_Config(void) {
     RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -287,16 +309,17 @@ void SystemClock_Config(void) {
     
     /* Configure the main internal regulator output voltage */
     __HAL_RCC_PWR_CLK_ENABLE();
-    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE2);
     
     /* Initializes the RCC Oscillators */
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-    RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+    RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+    RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
     RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-    RCC_OscInitStruct.PLL.PLLM = 4;
-    RCC_OscInitStruct.PLL.PLLN = 168;
-    RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+    RCC_OscInitStruct.PLL.PLLM = 16;  // HSI = 16MHz / 16 = 1MHz
+    RCC_OscInitStruct.PLL.PLLN = 336;  // 1MHz * 336 = 336MHz
+    RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;  // 336MHz / 4 = 84MHz
     RCC_OscInitStruct.PLL.PLLQ = 7;
     
     if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
@@ -308,10 +331,10 @@ void SystemClock_Config(void) {
                                   RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
     RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
-    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
+    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;  // 42MHz
+    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;  // 84MHz
     
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK) {
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
         Error_Handler();
     }
 }

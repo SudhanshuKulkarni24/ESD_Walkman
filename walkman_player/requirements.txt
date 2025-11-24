@@ -1,0 +1,12 @@
+# Walkman Music Player - Dependencies
+
+# Core audio playback
+pygame>=2.1.0
+
+# GPIO (only needed on DragonBoard/Raspberry Pi)
+# Uncomment when deploying to embedded systems:
+# RPi.GPIO>=0.7.0  # For Raspberry Pi
+# adafruit-circuitpython-gpiod>=1.3.0  # Alternative for more boards
+
+# Development/Optional
+python-dotenv>=0.19.0  # For configuration management

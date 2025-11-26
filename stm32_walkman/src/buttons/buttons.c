@@ -1,10 +1,12 @@
 /**
  * STM32 Button Handler - GPIO-based button input
+ * BARE METAL - No HAL, direct register access via bare metal GPIO driver
  * Buttons: Previous, Play/Pause, Next, Volume Up, Volume Down
  */
 
 #include "buttons.h"
-#include "stm32f4xx_hal.h"
+#include "gpio.h"
+#include "system.h"
 #include <string.h>
 
 /* Button configuration */
@@ -40,42 +42,39 @@ static volatile uint32_t button_interrupt_flags = 0;
 
 /**
  * Initialize button inputs
+ * Uses bare metal GPIO driver with EXTI interrupts
  */
 int buttons_init(void) {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    /* Initialize GPIO ports for buttons */
+    gpio_init_port(GPIO_PORT_A);  /* PA0 - User button */
+    gpio_init_port(GPIO_PORT_D);  /* PD0-2, PD13-15 - Custom buttons */
     
-    /* Enable GPIO clocks */
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_GPIOD_CLK_ENABLE();
-    __HAL_RCC_SYSCFG_CLK_ENABLE();
+    /* Configure PA0 (Volume Up - User button) with interrupt */
+    gpio_config_interrupt(GPIO_PORT_A, 0, GPIO_INT_FALLING);
     
-    /* Configure PA0 as input with pull-up and interrupt on falling edge (User button) */
-    GPIO_InitStruct.Pin = GPIO_PIN_0;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    /* Configure PD0 (Volume Down) with interrupt */
+    gpio_config_interrupt(GPIO_PORT_D, 0, GPIO_INT_FALLING);
     
-    /* Configure PD0, PD1, PD2, PD13, PD14, PD15 as input with pull-up and interrupt on falling edge */
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | 
-                          GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+    /* Configure PD1 (Shuffle) with interrupt */
+    gpio_config_interrupt(GPIO_PORT_D, 1, GPIO_INT_FALLING);
     
-    /* Configure EXTI interrupts */
-    HAL_NVIC_SetPriority(EXTI0_IRQn, 2, 0);
-    HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+    /* Configure PD2 (Loop) with interrupt */
+    gpio_config_interrupt(GPIO_PORT_D, 2, GPIO_INT_FALLING);
     
-    HAL_NVIC_SetPriority(EXTI1_IRQn, 2, 0);
-    HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+    /* Configure PD13 (Previous) with interrupt */
+    gpio_config_interrupt(GPIO_PORT_D, 13, GPIO_INT_FALLING);
     
-    HAL_NVIC_SetPriority(EXTI2_IRQn, 2, 0);
-    HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+    /* Configure PD14 (Play/Pause) with interrupt */
+    gpio_config_interrupt(GPIO_PORT_D, 14, GPIO_INT_FALLING);
     
-    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
-    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+    /* Configure PD15 (Next) with interrupt */
+    gpio_config_interrupt(GPIO_PORT_D, 15, GPIO_INT_FALLING);
+    
+    /* Set interrupt priorities (lower number = higher priority) */
+    NVIC_SetPriority(EXTI0_IRQn, 5);
+    NVIC_SetPriority(EXTI1_IRQn, 5);
+    NVIC_SetPriority(EXTI2_IRQn, 5);
+    NVIC_SetPriority(EXTI15_10_IRQn, 5);
     
     return BUTTONS_OK;
 }
@@ -95,16 +94,17 @@ int buttons_register_callback(button_t button, button_callback_t callback) {
 /**
  * Poll buttons for changes (call from main loop)
  * This handles debouncing and long-press detection after interrupt
+ * Uses bare metal GPIO reading
  */
 void buttons_poll(void) {
-    uint32_t current_time = HAL_GetTick();
+    uint32_t current_time = system_get_tick();
     
     for (int i = 0; i < NUM_BUTTONS; i++) {
         button_config_t* btn = &buttons[i];
         
-        /* Read current GPIO state (0 = released, 1 = pressed on pull-up with falling edge) */
-        GPIO_PinState pin_state = HAL_GPIO_ReadPin(btn->port, btn->pin);
-        uint8_t current_state = (pin_state == GPIO_PIN_RESET) ? 1 : 0;
+        /* Read current GPIO state (0 = released, 1 = pressed with pull-up) */
+        uint8_t pin_state = gpio_read(btn->port, btn->pin);
+        uint8_t current_state = pin_state ? 0 : 1;  /* Invert for active-low logic */
         
         /* Debounce logic with hysteresis */
         if (current_state != btn->state) {
@@ -142,14 +142,15 @@ void buttons_poll(void) {
 
 /**
  * Check if button is currently pressed
+ * Bare metal GPIO reading
  */
 int buttons_is_pressed(button_t button) {
     if (button >= NUM_BUTTONS) {
         return 0;
     }
     
-    GPIO_PinState pin_state = HAL_GPIO_ReadPin(buttons[button].port, buttons[button].pin);
-    return (pin_state == GPIO_PIN_RESET) ? 1 : 0;
+    uint8_t pin_state = gpio_read(buttons[button].port, buttons[button].pin);
+    return pin_state ? 0 : 1;  /* Invert for active-low logic */
 }
 
 /**
@@ -165,46 +166,40 @@ button_event_t buttons_get_state(button_t button) {
 
 /**
  * External interrupt handlers for button presses
- * STM32F407 uses PD13-15 and PD0-2 for buttons, PA0 for user button
+ * STM32F407 uses PD0-2, PD13-15 and PA0 for buttons
+ * Bare metal EXTI handling with direct register access
  */
 
 void EXTI0_IRQHandler(void) {
-    HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0);
+    /* Clear pending flag */
+    gpio_exti_clear(0);
     button_interrupt_flags |= (1 << 0);
 }
 
 void EXTI1_IRQHandler(void) {
-    HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_1);
+    /* Clear pending flag */
+    gpio_exti_clear(1);
     button_interrupt_flags |= (1 << 1);
 }
 
 void EXTI2_IRQHandler(void) {
-    HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_2);
+    /* Clear pending flag */
+    gpio_exti_clear(2);
     button_interrupt_flags |= (1 << 2);
 }
 
 void EXTI15_10_IRQHandler(void) {
     /* Handles EXTI10-15 for PD13, PD14, PD15 */
-    if (__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_13) != RESET) {
-        HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_13);
+    if (EXTI->PR & (1 << 13)) {
+        gpio_exti_clear(13);
         button_interrupt_flags |= (1 << 3);
     }
-    if (__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_14) != RESET) {
-        HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_14);
+    if (EXTI->PR & (1 << 14)) {
+        gpio_exti_clear(14);
         button_interrupt_flags |= (1 << 4);
     }
-    if (__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_15) != RESET) {
-        HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_15);
+    if (EXTI->PR & (1 << 15)) {
+        gpio_exti_clear(15);
         button_interrupt_flags |= (1 << 5);
     }
-}
-
-/**
- * HAL interrupt callback
- * Called by HAL_GPIO_EXTI_IRQHandler for button press
- * Triggers immediate response (interrupt context - keep it short!)
- */
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-    /* Mark button as needing debounce in main loop */
-    /* The actual event handling happens in buttons_poll() after debounce */
 }

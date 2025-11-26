@@ -1,24 +1,24 @@
 /**
  * ILI9341 LCD Display Driver for STM32F407 Discovery
+ * BARE METAL - No HAL, direct register access via bare metal drivers
  * 240x320 TFT Display with SPI5 Interface
  * Shows current song and playback controls
  * 
  * SPI5 Pins:
- * - PF7: SPI5_SCK (Clock)
- * - PF8: SPI5_MISO (not used for display)
- * - PF9: SPI5_MOSI (Data)
+ * - PF7: SPI5_SCK (Clock) - AF5
+ * - PF8: SPI5_MISO (not used for display) - AF5
+ * - PF9: SPI5_MOSI (Data) - AF5
  * - PF6: GPIO output (Chip Select)
  * - PF10: GPIO output (Data/Command)
  * - PF11: GPIO output (Reset)
  */
 
 #include "lcd_display.h"
-#include "stm32f4xx_hal.h"
+#include "gpio.h"
+#include "spi.h"
+#include "system.h"
 #include <string.h>
 #include <stdio.h>
-
-/* LCD SPI handle - using SPI5 on F407 */
-SPI_HandleTypeDef hspi5;
 
 /* Display buffer and state */
 static lcd_state_t lcd_state = {0};
@@ -32,48 +32,34 @@ static const uint8_t font_5x7[256][5] = {
 
 /**
  * Initialize LCD display
+ * Uses bare metal SPI5 and GPIO drivers
  */
 int lcd_init(void) {
-    // Initialize SPI5 for LCD communication (F407 Discovery)
-    hspi5.Instance = SPI5;
-    hspi5.Init.Mode = SPI_MODE_MASTER;
-    hspi5.Init.Direction = SPI_DIRECTION_2LINES;
-    hspi5.Init.DataSize = SPI_DATASIZE_8BIT;
-    hspi5.Init.CLKPolarity = SPI_POLARITY_LOW;
-    hspi5.Init.CLKPhase = SPI_PHASE_1EDGE;
-    hspi5.Init.NSS = SPI_NSS_SOFT;
-    hspi5.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
-    hspi5.Init.FirstBit = SPI_FIRSTBIT_MSB;
-    hspi5.Init.TIMode = SPI_TIMODE_DISABLE;
-    hspi5.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+    /* Initialize SPI5 for LCD communication (F407 Discovery) */
+    /* SPI5: 84MHz APB2 / 2 = 42MHz clock */
+    spi_init(SPI_BUS_5, SPI_DATASIZE_8BIT, SPI_PRESCALER_2, 
+             SPI_CPOL_LOW, SPI_CPHA_1EDGE);
     
-    if (HAL_SPI_Init(&hspi5) != HAL_OK) {
-        return LCD_ERROR;
-    }
+    /* Initialize GPIO for LCD control pins (CS, DC, RST) */
+    gpio_init_port(GPIO_PORT_F);
     
-    // Initialize GPIO for LCD control pins (CS, DC, RST)
-    // Using PF6 (CS), PF10 (DC), PF11 (RST)
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    __HAL_RCC_GPIOF_CLK_ENABLE();
+    /* Configure PF6 (CS), PF10 (DC), PF11 (RST) as GPIO outputs */
+    gpio_config(GPIO_PORT_F, 6, GPIO_MODE_OUTPUT, GPIO_OUTPUT_PP, GPIO_SPEED_HIGH, GPIO_NO_PULL);
+    gpio_config(GPIO_PORT_F, 10, GPIO_MODE_OUTPUT, GPIO_OUTPUT_PP, GPIO_SPEED_HIGH, GPIO_NO_PULL);
+    gpio_config(GPIO_PORT_F, 11, GPIO_MODE_OUTPUT, GPIO_OUTPUT_PP, GPIO_SPEED_HIGH, GPIO_NO_PULL);
     
-    GPIO_InitStruct.Pin = GPIO_PIN_6 | GPIO_PIN_10 | GPIO_PIN_11;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
-    
-    // Initialize display
+    /* Initialize display */
     lcd_reset();
-    lcd_write_cmd(0x01);  // Software reset
-    HAL_Delay(150);
+    lcd_write_cmd(0x01);  /* Software reset */
+    system_delay_ms(150);
     
-    lcd_write_cmd(0x28);  // Display OFF
-    lcd_write_cmd(0x11);  // Sleep OUT
-    HAL_Delay(150);
+    lcd_write_cmd(0x28);  /* Display OFF */
+    lcd_write_cmd(0x11);  /* Sleep OUT */
+    system_delay_ms(150);
     
-    lcd_write_cmd(0x29);  // Display ON
+    lcd_write_cmd(0x29);  /* Display ON */
     
-    // Clear display
+    /* Clear display */
     lcd_fill_rect(0, 0, LCD_WIDTH, LCD_HEIGHT, COLOR_BLACK);
     lcd_state.initialized = 1;
     
@@ -82,34 +68,37 @@ int lcd_init(void) {
 
 /**
  * Reset LCD display
+ * Uses bare metal GPIO
  */
 void lcd_reset(void) {
-    HAL_GPIO_WritePin(LCD_GPIO_PORT, LCD_RST_PIN, GPIO_PIN_SET);
-    HAL_Delay(10);
-    HAL_GPIO_WritePin(LCD_GPIO_PORT, LCD_RST_PIN, GPIO_PIN_RESET);
-    HAL_Delay(10);
-    HAL_GPIO_WritePin(LCD_GPIO_PORT, LCD_RST_PIN, GPIO_PIN_SET);
-    HAL_Delay(150);
+    gpio_set(GPIO_PORT_F, 11);     /* RST = 1 */
+    system_delay_ms(10);
+    gpio_clear(GPIO_PORT_F, 11);   /* RST = 0 */
+    system_delay_ms(10);
+    gpio_set(GPIO_PORT_F, 11);     /* RST = 1 */
+    system_delay_ms(150);
 }
 
 /**
  * Write command byte to LCD
+ * Uses bare metal SPI5 and GPIO
  */
 void lcd_write_cmd(uint8_t cmd) {
-    HAL_GPIO_WritePin(LCD_GPIO_PORT, LCD_DC_PIN, GPIO_PIN_RESET);  // DC = 0 for command
-    HAL_GPIO_WritePin(LCD_GPIO_PORT, LCD_CS_PIN, GPIO_PIN_RESET);  // CS = 0
-    HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
-    HAL_GPIO_WritePin(LCD_GPIO_PORT, LCD_CS_PIN, GPIO_PIN_SET);    // CS = 1
+    gpio_clear(GPIO_PORT_F, 10);   /* DC = 0 for command */
+    gpio_clear(GPIO_PORT_F, 6);    /* CS = 0 */
+    spi_write_byte(SPI_BUS_5, cmd);
+    gpio_set(GPIO_PORT_F, 6);      /* CS = 1 */
 }
 
 /**
  * Write data byte to LCD
+ * Uses bare metal SPI5 and GPIO
  */
 void lcd_write_data(uint8_t data) {
-    HAL_GPIO_WritePin(LCD_GPIO_PORT, LCD_DC_PIN, GPIO_PIN_SET);    // DC = 1 for data
-    HAL_GPIO_WritePin(LCD_GPIO_PORT, LCD_CS_PIN, GPIO_PIN_RESET);  // CS = 0
-    HAL_SPI_Transmit(&hspi1, &data, 1, HAL_MAX_DELAY);
-    HAL_GPIO_WritePin(LCD_GPIO_PORT, LCD_CS_PIN, GPIO_PIN_SET);    // CS = 1
+    gpio_set(GPIO_PORT_F, 10);     /* DC = 1 for data */
+    gpio_clear(GPIO_PORT_F, 6);    /* CS = 0 */
+    spi_write_byte(SPI_BUS_5, data);
+    gpio_set(GPIO_PORT_F, 6);      /* CS = 1 */
 }
 
 /**

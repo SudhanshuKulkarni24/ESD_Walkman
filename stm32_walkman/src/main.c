@@ -1,5 +1,6 @@
 /**
  * STM32F407 Discovery Walkman Music Player - Main Application
+ * BARE METAL - No HAL layer, direct register access
  * 
  * Hardware:
  * - MCU: STM32F407VGT6 Discovery board
@@ -19,7 +20,7 @@
  * - True stereo audio output
  * 
  * Memory Constraints (F407):
- * - RAM: 192KB total (2x F401)
+ * - RAM: 192KB total
  * - Audio buffer: 44100 samples = 1 second at 44.1kHz
  * - Audio streamed from SD card via SDIO
  * 
@@ -28,7 +29,11 @@
  * I2C1 for codec configuration
  */
 
-#include "stm32f4xx_hal.h"
+#include "system.h"
+#include "gpio.h"
+#include "spi.h"
+#include "i2c.h"
+#include "i2s.h"
 #include "player.h"
 #include "lcd_display.h"
 #include "buttons.h"
@@ -67,11 +72,11 @@ void app_update_display(void);
  * Main application entry point
  */
 int main(void) {
-    /* Initialize HAL */
-    HAL_Init();
+    /* Initialize system clock and SysTick */
+    system_init();
     
-    /* Configure system clock */
-    SystemClock_Config();
+    /* Enable SysTick timer */
+    SysTick->CTRL |= SysTick_CTRL_ENABLE_Msk;
     
     /* Initialize subsystems */
     app_init();
@@ -136,7 +141,7 @@ void app_init(void) {
  * Main application loop
  */
 void app_loop(void) {
-    uint32_t current_time = HAL_GetTick();
+    uint32_t current_time = system_get_tick();
     
     /* Poll button inputs */
     buttons_poll();
@@ -300,58 +305,11 @@ void app_update_display(void) {
 
 /**
  * System clock configuration for STM32F407
+ * REMOVED - Now using bare metal system_init()
  * 
- * F407 Configuration:
- * - System Clock: 168 MHz (maximum for F407)
- * - APB1: 42 MHz
- * - APB2: 84 MHz
- * - HSI: 16 MHz (internal oscillator)
- * 
- * Note: F407 uses HSI (16MHz internal clock), can also use HSE
- * Uses PLL: (16/16) * 336 / 2 = 168MHz
+ * System clock is configured in system.c via direct register access
+ * For details, see system_init() function
  */
-void SystemClock_Config(void) {
-    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-    
-    /* Configure the main internal regulator output voltage */
-    __HAL_RCC_PWR_CLK_ENABLE();
-    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
-    
-    /* Initializes the RCC Oscillators */
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-    RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-    RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-    RCC_OscInitStruct.PLL.PLLM = 16;  // HSI = 16MHz / 16 = 1MHz
-    RCC_OscInitStruct.PLL.PLLN = 336;  // 1MHz * 336 = 336MHz
-    RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;  // 336MHz / 2 = 168MHz (F407 max)
-    RCC_OscInitStruct.PLL.PLLQ = 7;
-    
-    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
-        Error_Handler();
-    }
-    
-    /* Initializes the CPU, AHB and APB buses clocks */
-    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
-                                  RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
-    RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-    RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;  // 42MHz (168/4)
-    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;  // 84MHz (168/2)
-    
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK) {
-        Error_Handler();
-    }
-}
-
-/**
- * Error handler
- */
-void Error_Handler(void) {
-    while (1);
-}
 
 /**
  * Assert failed handler

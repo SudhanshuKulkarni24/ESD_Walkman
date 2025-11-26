@@ -1,5 +1,6 @@
 /**
  * STM32F407 Audio Player Core - Codec-based Audio Playback
+ * BARE METAL - No HAL, direct register access via bare metal drivers
  * Supports playlist management and playback control
  * 
  * Audio System: WM8994 codec via I2S3 interface
@@ -9,7 +10,7 @@
 
 #include "player.h"
 #include "codec.h"
-#include "stm32f4xx_hal.h"
+#include "i2s.h"
 #include <string.h>
 #include <stdio.h>
 

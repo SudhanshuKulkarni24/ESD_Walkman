@@ -1,5 +1,6 @@
 /**
  * WM8994 Audio Codec Implementation for STM32F407 Discovery
+ * BARE METAL - No HAL, direct register access via bare metal drivers
  * 
  * Communicates via:
  * - I2C1 (codec control): PB6 (SCL), PB7 (SDA)
@@ -8,7 +9,10 @@
  */
 
 #include "codec.h"
-#include "stm32f4xx_hal.h"
+#include "i2c.h"
+#include "i2s.h"
+#include "gpio.h"
+#include "system.h"
 #include <string.h>
 
 /* WM8994 Register Map */
@@ -36,8 +40,6 @@
 
 /* Global state */
 static struct {
-    I2C_HandleTypeDef hi2c1;
-    I2S_HandleTypeDef hi2s3;
     uint8_t is_initialized;
     uint8_t is_playing;
     uint8_t volume;
@@ -56,14 +58,13 @@ static struct {
 /* ============ Low-level I2C Communication ============ */
 
 /**
- * Read register from WM8994 via I2C
+ * Read register from WM8994 via I2C (bare metal)
  */
 codec_status_t codec_read_register(uint16_t addr, uint16_t *value) {
+    uint8_t reg_addr = addr & 0xFF;
     uint8_t data[2] = {0, 0};
-    uint8_t reg_addr = (addr >> 8) & 0xFF;
     
-    if (HAL_I2C_Mem_Read(&codec_state.hi2c1, WM8994_ADDR, reg_addr, 
-                         I2C_MEMADD_SIZE_8BIT, data, 2, WM8994_TIMEOUT) != HAL_OK) {
+    if (i2c_write_read(I2C_BUS_1, 0x1A, reg_addr, data, 2) != 0) {
         return CODEC_TIMEOUT;
     }
     
@@ -72,124 +73,54 @@ codec_status_t codec_read_register(uint16_t addr, uint16_t *value) {
 }
 
 /**
- * Write register to WM8994 via I2C
+ * Write register to WM8994 via I2C (bare metal)
  */
 codec_status_t codec_write_register(uint16_t addr, uint16_t value) {
     uint8_t data[3];
-    uint8_t reg_addr = (addr >> 8) & 0xFF;
     
-    data[0] = (addr >> 8) & 0xFF;
+    data[0] = addr & 0xFF;
     data[1] = (value >> 8) & 0xFF;
     data[2] = value & 0xFF;
     
-    if (HAL_I2C_Master_Transmit(&codec_state.hi2c1, WM8994_ADDR, data, 3, WM8994_TIMEOUT) != HAL_OK) {
+    if (i2c_write(I2C_BUS_1, 0x1A, data, 3) != 0) {
         return CODEC_TIMEOUT;
     }
     
     return CODEC_OK;
 }
 
-/* ============ GPIO and Clock Setup ============ */
-
 /**
- * Initialize GPIO for codec control
+ * Initialize GPIO for codec control (bare metal)
  */
 static void codec_gpio_init(void) {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    
-    __HAL_RCC_GPIOD_CLK_ENABLE();
+    /* Initialize GPIOD for codec power control */
+    gpio_init_port(GPIO_PORT_D);
     
     /* PD4 as codec power enable (active high) */
-    GPIO_InitStruct.Pin = GPIO_PIN_4;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+    gpio_config(GPIO_PORT_D, 4, GPIO_MODE_OUTPUT, GPIO_OUTPUT_PP, GPIO_SPEED_HIGH, GPIO_NO_PULL);
     
     /* Enable codec power */
-    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_4, GPIO_PIN_SET);
+    gpio_set(GPIO_PORT_D, 4);
 }
 
 /**
- * Initialize I2C1 for codec control
+ * Initialize I2C1 for codec control (bare metal)
  */
 static void codec_i2c_init(void) {
-    __HAL_RCC_I2C1_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    
-    /* Configure PB6 and PB7 as I2C1 */
-    GPIO_InitStruct.Pin = GPIO_PIN_6 | GPIO_PIN_7;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-    
-    /* I2C configuration */
-    codec_state.hi2c1.Instance = I2C1;
-    codec_state.hi2c1.Init.ClockSpeed = 400000;
-    codec_state.hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
-    codec_state.hi2c1.Init.OwnAddress1 = 0;
-    codec_state.hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-    codec_state.hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-    codec_state.hi2c1.Init.OwnAddress2 = 0;
-    codec_state.hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-    codec_state.hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-    
-    HAL_I2C_Init(&codec_state.hi2c1);
+    /* Initialize I2C1 with 400kHz clock */
+    i2c_init(I2C_BUS_1, 400000);
 }
 
 /**
- * Initialize I2S3 for audio streaming
+ * Initialize I2S3 for audio streaming (bare metal)
  */
 static void codec_i2s_init(void) {
-    __HAL_RCC_I2S_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    
-    /* Configure PC7 (I2S3_MCLK) */
-    GPIO_InitStruct.Pin = GPIO_PIN_7;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
-    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-    
-    /* Configure PC10 (I2S3_CK), PC12 (I2S3_SD) */
-    GPIO_InitStruct.Pin = GPIO_PIN_10 | GPIO_PIN_12;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
-    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-    
-    /* Configure PA4 (I2S3_WS) */
-    GPIO_InitStruct.Pin = GPIO_PIN_4;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-    
-    /* I2S3 configuration */
-    codec_state.hi2s3.Instance = SPI3;
-    codec_state.hi2s3.Init.Mode = I2S_MODE_MASTER_TX;
-    codec_state.hi2s3.Init.Standard = I2S_STANDARD_PHILIPS;
-    codec_state.hi2s3.Init.DataFormat = I2S_DATAFORMAT_16B;
-    codec_state.hi2s3.Init.MCLKOutput = I2S_MCLK_ENABLE;
-    codec_state.hi2s3.Init.AudioFreq = I2S_AUDIOFREQ_44K;  // 44.1kHz
-    codec_state.hi2s3.Init.CPOL = I2S_CPOL_LOW;
-    codec_state.hi2s3.Init.ClockSource = I2S_CLOCK_PLL;
-    
-    HAL_I2S_Init(&codec_state.hi2s3);
+    /* I2S3 (SPI3) is initialized via bare metal i2s driver */
+    i2s_init(I2S_SR_44100);
 }
 
 /**
- * Configure WM8994 registers for audio output
+ * Configure WM8994 registers for audio output (bare metal)
  */
 static codec_status_t codec_configure_chip(void) {
     uint16_t reg_value;
@@ -200,29 +131,29 @@ static codec_status_t codec_configure_chip(void) {
     }
     
     if ((reg_value & 0xFF00) != 0x8900) {
-        return CODEC_ERROR;  // Not WM8994
+        return CODEC_ERROR;  /* Not WM8994 */
     }
     
     /* Reset codec */
     codec_write_register(0x0000, 0x0000);
-    HAL_Delay(10);
+    system_delay_ms(10);
     
     /* Power management: enable core, output mixer, DAC */
-    codec_write_register(WM8994_POWER_MANAGEMENT_1, 0x1003);  // VMID, BIAS
+    codec_write_register(WM8994_POWER_MANAGEMENT_1, 0x1003);  /* VMID, BIAS */
     codec_write_register(WM8994_POWER_MANAGEMENT_2, 0x0000);
     codec_write_register(WM8994_POWER_MANAGEMENT_3, 0x0000);
     
-    HAL_Delay(100);
+    system_delay_ms(100);
     
     /* Configure audio interface for I2S */
-    codec_write_register(WM8994_AUDIO_INTERFACE_1, 0x0000);   // I2S, 16-bit
-    codec_write_register(WM8994_AUDIO_INTERFACE_2, 0x4000);   // 44.1kHz
+    codec_write_register(WM8994_AUDIO_INTERFACE_1, 0x0000);   /* I2S, 16-bit */
+    codec_write_register(WM8994_AUDIO_INTERFACE_2, 0x4000);   /* 44.1kHz */
     
     /* Set volume */
     codec_set_volume(codec_state.volume);
     
     /* Output configuration */
-    codec_write_register(WM8994_OUTPUT_MIXER_1, 0x0001);      // DAC to output mixer
+    codec_write_register(WM8994_OUTPUT_MIXER_1, 0x0001);      /* DAC to output mixer */
     codec_write_register(WM8994_OUTPUT_MIXER_2, 0x0001);
     
     return CODEC_OK;

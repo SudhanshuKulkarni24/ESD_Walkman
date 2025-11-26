@@ -299,15 +299,16 @@ void app_update_display(void) {
 }
 
 /**
- * System clock configuration for STM32F401RE
+ * System clock configuration for STM32F407
  * 
- * F401RE Configuration:
- * - System Clock: 84 MHz (maximum for F401)
+ * F407 Configuration:
+ * - System Clock: 168 MHz (maximum for F407)
  * - APB1: 42 MHz
  * - APB2: 84 MHz
  * - HSI: 16 MHz (internal oscillator)
  * 
- * Note: F401RE uses HSI (16MHz internal clock), not HSE
+ * Note: F407 uses HSI (16MHz internal clock), can also use HSE
+ * Uses PLL: (16/16) * 336 / 2 = 168MHz
  */
 void SystemClock_Config(void) {
     RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -315,7 +316,7 @@ void SystemClock_Config(void) {
     
     /* Configure the main internal regulator output voltage */
     __HAL_RCC_PWR_CLK_ENABLE();
-    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE2);
+    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
     
     /* Initializes the RCC Oscillators */
     RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
@@ -325,7 +326,7 @@ void SystemClock_Config(void) {
     RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
     RCC_OscInitStruct.PLL.PLLM = 16;  // HSI = 16MHz / 16 = 1MHz
     RCC_OscInitStruct.PLL.PLLN = 336;  // 1MHz * 336 = 336MHz
-    RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;  // 336MHz / 4 = 84MHz
+    RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;  // 336MHz / 2 = 168MHz (F407 max)
     RCC_OscInitStruct.PLL.PLLQ = 7;
     
     if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
@@ -337,10 +338,10 @@ void SystemClock_Config(void) {
                                   RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
     RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;  // 42MHz
-    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;  // 84MHz
+    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;  // 42MHz (168/4)
+    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;  // 84MHz (168/2)
     
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK) {
         Error_Handler();
     }
 }

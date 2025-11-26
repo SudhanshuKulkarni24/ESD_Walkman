@@ -12,11 +12,11 @@
 #define LCD_WIDTH 240
 #define LCD_HEIGHT 320
 
-/* LCD Control Pins (adjust based on your STM32 board) */
-#define LCD_GPIO_PORT GPIOA
-#define LCD_CS_PIN    GPIO_PIN_4   // Chip Select
-#define LCD_DC_PIN    GPIO_PIN_5   // Data/Command
-#define LCD_RST_PIN   GPIO_PIN_6   // Reset
+/* LCD Control Pins (STM32F407 Discovery) */
+#define LCD_GPIO_PORT GPIOF
+#define LCD_CS_PIN    GPIO_PIN_6   // Chip Select
+#define LCD_DC_PIN    GPIO_PIN_10  // Data/Command
+#define LCD_RST_PIN   GPIO_PIN_11  // Reset
 
 /* RGB565 Color Definitions */
 #define COLOR_BLACK       0x0000

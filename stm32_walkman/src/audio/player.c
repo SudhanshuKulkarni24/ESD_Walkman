@@ -1,20 +1,20 @@
 /**
- * STM32F401RE Audio Player Core - PWM-based Audio Playback
+ * STM32F407 Audio Player Core - Codec-based Audio Playback
  * Supports playlist management and playback control
  * 
- * Audio System: PWM with RC Filter on PA0 (TIM2_CH1)
- * Sample Rate: 44100 Hz
- * Resolution: 8-bit equivalent PWM
+ * Audio System: WM8994 codec via I2S3 interface
+ * Sample Rate: 44100 Hz (configurable to 48kHz, 96kHz)
+ * Resolution: 16-bit stereo
  */
 
 #include "player.h"
-#include "pwm_audio.h"
+#include "codec.h"
 #include "stm32f4xx_hal.h"
 #include <string.h>
 #include <stdio.h>
 
 /* Audio buffer for playback */
-#define AUDIO_BUFFER_SIZE 22050  // 500ms at 44.1kHz (max for F401RE 96KB RAM)
+#define AUDIO_BUFFER_SIZE 44100  // 1 second at 44.1kHz (192KB RAM available on F407)
 static int16_t audio_buffer[AUDIO_BUFFER_SIZE];
 static uint32_t audio_buffer_pos = 0;
 static uint32_t audio_buffer_len = 0;
@@ -32,11 +32,13 @@ static player_t player_state = {
 /**
  * Initialize audio player
  * 
- * Initializes PWM audio output on PA0 with 44.1kHz sampling
+ * Initializes WM8994 codec via I2C1 and I2S3
  */
 int player_init(void) {
-    // Initialize PWM audio system
-    pwm_audio_init();
+    // Initialize codec (I2C1 for control, I2S3 for audio)
+    if (codec_init() != CODEC_OK) {
+        return PLAYER_ERROR;
+    }
     
     return PLAYER_OK;
 }
@@ -66,8 +68,8 @@ int player_load_file(const char* filename) {
 /**
  * Start playback
  * 
- * Note: For F401RE with limited RAM (96KB), audio is streamed from SD card
- * This function starts playback of currently loaded audio buffer
+ * Note: For F407 with 192KB RAM, audio buffer is larger (1 second vs 500ms on F401)
+ * Audio is streamed from SD card via SDIO and played through codec
  */
 int player_play(void) {
     if (audio_buffer_len == 0) {
@@ -78,8 +80,10 @@ int player_play(void) {
     player_state.is_paused = 0;
     audio_buffer_pos = 0;
     
-    // Start PWM audio playback
-    audio_play(audio_buffer, audio_buffer_len);
+    // Start codec audio playback via I2S3 DMA
+    if (codec_play(audio_buffer, audio_buffer_len) != CODEC_OK) {
+        return PLAYER_ERROR;
+    }
     
     return PLAYER_OK;
 }
@@ -93,7 +97,7 @@ int player_pause(void) {
     }
     
     player_state.is_paused = 1;
-    audio_pause();
+    codec_pause();
     
     return PLAYER_OK;
 }
@@ -107,7 +111,7 @@ int player_resume(void) {
     }
     
     player_state.is_paused = 0;
-    audio_resume();
+    codec_resume();
     
     return PLAYER_OK;
 }
@@ -118,7 +122,7 @@ int player_resume(void) {
 int player_stop(void) {
     player_state.is_playing = 0;
     player_state.is_paused = 0;
-    audio_stop();
+    codec_stop();
     audio_buffer_pos = 0;
     
     return PLAYER_OK;
@@ -133,7 +137,7 @@ int player_set_volume(uint8_t volume) {
     }
     
     player_state.volume = volume;
-    audio_set_volume(volume);
+    codec_set_volume(volume);
     
     return PLAYER_OK;
 }
@@ -175,8 +179,8 @@ player_t* player_get_state(void) {
  * Get playback position in seconds
  */
 uint32_t player_get_position(void) {
-    uint32_t samples = audio_get_position();
-    return samples / 44100;
+    uint32_t samples = codec_get_position();
+    return samples / CODEC_SAMPLE_RATE_44100;
 }
 
 /**

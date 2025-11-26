@@ -1,25 +1,31 @@
 /**
- * STM32F401RE Walkman Music Player - Main Application
+ * STM32F407 Discovery Walkman Music Player - Main Application
  * 
  * Hardware:
- * - MCU: STM32F401RET6 Nucleo board
- * - Audio: PWM-based via PA0 with RC filter (R=10kΩ, C=100nF)
- * - Display: ILI9341 240x320 LCD via SPI1
- * - Input: 7 GPIO buttons
- * - Storage: SD card via SPI2
+ * - MCU: STM32F407VGT6 Discovery board
+ * - Audio: On-board WM8994 audio codec via I2S3 + I2C1
+ * - Display: ILI9341 240x320 LCD via SPI5
+ * - Input: 7 GPIO buttons (PA0, PA13-PA15, PD13-PD15)
+ * - Storage: SD card via SDIO (built-in, no SPI needed)
+ * - User LED: PD12 (green)
  * 
  * Features:
  * - Playlist management (from SD card)
  * - Play/Pause/Stop controls
- * - Volume control (0-100%)
+ * - Volume control (0-100%) via WM8994 codec
  * - Shuffle and loop modes
  * - Real-time playback display
- * - MP3/WAV file support (requires decoder library)
+ * - MP3/WAV file support (via codec DAC)
+ * - True stereo audio output
  * 
- * Memory Constraints (F401RE):
- * - RAM: 96KB total
- * - Audio buffer: 22050 samples = 500ms at 44.1kHz
- * - Audio must be streamed from SD card (not loaded entirely to RAM)
+ * Memory Constraints (F407):
+ * - RAM: 192KB total (2x F401)
+ * - Audio buffer: 44100 samples = 1 second at 44.1kHz
+ * - Audio streamed from SD card via SDIO
+ * 
+ * I2S Audio Chain:
+ * STM32F407 I2S3 → WM8994 codec → Line-out (stereo jack)
+ * I2C1 for codec configuration
  */
 
 #include "stm32f4xx_hal.h"

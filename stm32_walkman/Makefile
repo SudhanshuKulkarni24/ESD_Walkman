@@ -1,7 +1,7 @@
 # STM32 Walkman Player - Makefile
-# Adapted for STM32F4 using ARM GCC
+# Adapted for STM32F407 Discovery with on-board audio codec (WM8994)
 
-TARGET = stm32_walkman
+TARGET = walkman_f407
 CROSS_COMPILE = arm-none-eabi-
 CC = $(CROSS_COMPILE)gcc
 OBJCOPY = $(CROSS_COMPILE)objcopy
@@ -17,6 +17,7 @@ SRC_DIR = src
 SOURCES = \
 	src/main.c \
 	src/audio/player.c \
+	src/audio/codec.c \
 	src/lcd/lcd_display.c \
 	src/buttons/buttons.c
 
@@ -26,6 +27,7 @@ HAL_SOURCES = \
 	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_gpio.c \
 	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c \
 	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2s.c \
+	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c.c \
 	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c \
 	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c \
 	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_cortex.c

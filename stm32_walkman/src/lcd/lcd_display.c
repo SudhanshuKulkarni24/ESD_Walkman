@@ -1,7 +1,15 @@
 /**
- * ILI9341 LCD Display Driver for STM32
- * 240x320 TFT Display with SPI Interface
+ * ILI9341 LCD Display Driver for STM32F407 Discovery
+ * 240x320 TFT Display with SPI5 Interface
  * Shows current song and playback controls
+ * 
+ * SPI5 Pins:
+ * - PF7: SPI5_SCK (Clock)
+ * - PF8: SPI5_MISO (not used for display)
+ * - PF9: SPI5_MOSI (Data)
+ * - PF6: GPIO output (Chip Select)
+ * - PF10: GPIO output (Data/Command)
+ * - PF11: GPIO output (Reset)
  */
 
 #include "lcd_display.h"
@@ -9,8 +17,8 @@
 #include <string.h>
 #include <stdio.h>
 
-/* LCD SPI handle */
-SPI_HandleTypeDef hspi1;
+/* LCD SPI handle - using SPI5 on F407 */
+SPI_HandleTypeDef hspi5;
 
 /* Display buffer and state */
 static lcd_state_t lcd_state = {0};
@@ -26,30 +34,33 @@ static const uint8_t font_5x7[256][5] = {
  * Initialize LCD display
  */
 int lcd_init(void) {
-    // Initialize SPI for LCD communication
-    hspi1.Instance = SPI1;
-    hspi1.Init.Mode = SPI_MODE_MASTER;
-    hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-    hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-    hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-    hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-    hspi1.Init.NSS = SPI_NSS_SOFT;
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
-    hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-    hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-    hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+    // Initialize SPI5 for LCD communication (F407 Discovery)
+    hspi5.Instance = SPI5;
+    hspi5.Init.Mode = SPI_MODE_MASTER;
+    hspi5.Init.Direction = SPI_DIRECTION_2LINES;
+    hspi5.Init.DataSize = SPI_DATASIZE_8BIT;
+    hspi5.Init.CLKPolarity = SPI_POLARITY_LOW;
+    hspi5.Init.CLKPhase = SPI_PHASE_1EDGE;
+    hspi5.Init.NSS = SPI_NSS_SOFT;
+    hspi5.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+    hspi5.Init.FirstBit = SPI_FIRSTBIT_MSB;
+    hspi5.Init.TIMode = SPI_TIMODE_DISABLE;
+    hspi5.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
     
-    if (HAL_SPI_Init(&hspi1) != HAL_OK) {
+    if (HAL_SPI_Init(&hspi5) != HAL_OK) {
         return LCD_ERROR;
     }
     
     // Initialize GPIO for LCD control pins (CS, DC, RST)
+    // Using PF6 (CS), PF10 (DC), PF11 (RST)
     GPIO_InitTypeDef GPIO_InitStruct = {0};
-    GPIO_InitStruct.Pin = LCD_CS_PIN | LCD_DC_PIN | LCD_RST_PIN;
+    __HAL_RCC_GPIOF_CLK_ENABLE();
+    
+    GPIO_InitStruct.Pin = GPIO_PIN_6 | GPIO_PIN_10 | GPIO_PIN_11;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(LCD_GPIO_PORT, &GPIO_InitStruct);
+    HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
     
     // Initialize display
     lcd_reset();
